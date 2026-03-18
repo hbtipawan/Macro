@@ -1,11 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  🇮🇳  India Macro Intelligence Dashboard  |  Streamlit Cloud Ready
-#  GitHub → https://github.com/YOUR_USERNAME/india-macro-dashboard
-#  Deploy → https://share.streamlit.io
+#  Deploy: https://share.streamlit.io  |  File: app.py
 # ─────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -16,22 +14,24 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
 
+# ── AUTO-REFRESH: safe import with fallback ───────────────────────────────────
+try:
+    from streamlit_autorefresh import st_autorefresh
+    st_autorefresh(interval=300_000, limit=None, key="macro_auto_refresh")
+    AUTOREFRESH_OK = True
+except ImportError:
+    AUTOREFRESH_OK = False
+
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="🇮🇳 India Macro Dashboard",
     page_icon="🇮🇳",
     layout="wide",
     initial_sidebar_state="expanded",
-    menu_items={
-        "Get Help": "https://github.com/YOUR_USERNAME/india-macro-dashboard",
-        "About": "India Macro Intelligence Dashboard | Built with Streamlit + yfinance"
-    }
+    menu_items={"About": "India Macro Intelligence Dashboard | Built with Streamlit + yfinance"}
 )
 
-# ── AUTO REFRESH every 5 minutes ─────────────────────────────────────────────
-st_autorefresh(interval=300_000, limit=None, key="macro_auto_refresh")
-
-# ── DARK THEME CSS ────────────────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 [data-testid="stAppViewContainer"] { background:#0d1117; }
@@ -41,24 +41,22 @@ div[data-testid="metric-container"] {
     background:#161b22; border-radius:10px;
     padding:14px 18px; border:1px solid #30363d;
 }
-div[data-testid="metric-container"] label {
-    color:#8b949e !important; font-size:12px;
-}
+div[data-testid="metric-container"] label { color:#8b949e !important; font-size:12px; }
 div[data-testid="metric-container"] [data-testid="stMetricValue"] {
     color:#e6edf3 !important; font-size:20px; font-weight:700;
 }
 h2,h3 { color:#e6edf3; }
 .section-hdr {
     background:linear-gradient(90deg,#1f2937,#111827);
-    border-left:4px solid #58a6ff;
-    padding:8px 16px; border-radius:6px;
-    color:#e6edf3; font-size:15px; font-weight:600; margin:12px 0 8px 0;
+    border-left:4px solid #58a6ff; padding:8px 16px;
+    border-radius:6px; color:#e6edf3; font-size:15px;
+    font-weight:600; margin:12px 0 8px 0;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  CONFIG TABLES
+#  CONFIG
 # ═════════════════════════════════════════════════════════════════════════════
 MARKET_TICKERS = {
     "Nifty 50":     ("^NSEI",      "pts", False),
@@ -94,12 +92,12 @@ CHART_PAIRS = {
 }
 
 WB_INDICATORS = {
-    "GDP Growth (%)":           ("NY.GDP.MKTP.KD.ZG",  "Direct"),
-    "CPI Inflation (%)":        ("FP.CPI.TOTL.ZG",     "Inverse"),
-    "Current Account (% GDP)":  ("BN.CAB.XOKA.GD.ZS",  "Inverse"),
-    "Unemployment (%)":         ("SL.UEM.TOTL.ZS",      "Inverse"),
-    "FDI Net Inflows (% GDP)":  ("BX.KLT.DINV.WD.GD.ZS","Direct"),
-    "Gross Capital Formation (%)":("NE.GDI.TOTL.ZS",   "Direct"),
+    "GDP Growth (%)":             ("NY.GDP.MKTP.KD.ZG",   "Direct"),
+    "CPI Inflation (%)":          ("FP.CPI.TOTL.ZG",      "Inverse"),
+    "Current Account (% GDP)":    ("BN.CAB.XOKA.GD.ZS",   "Inverse"),
+    "Unemployment (%)":           ("SL.UEM.TOTL.ZS",       "Inverse"),
+    "FDI Net Inflows (% GDP)":    ("BX.KLT.DINV.WD.GD.ZS","Direct"),
+    "Gross Capital Formation (%)":("NE.GDI.TOTL.ZS",      "Direct"),
 }
 
 ALL_MACRO = [
@@ -130,7 +128,7 @@ ALL_MACRO = [
 ]
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  DATA HELPERS
+#  DATA HELPERS  — all wrapped in try/except for cloud resilience
 # ═════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -145,9 +143,12 @@ def get_price(ticker: str):
 @st.cache_data(ttl=300, show_spinner=False)
 def get_history(ticker: str, period: str = "2y") -> pd.DataFrame:
     try:
-        df = yf.download(ticker, period=period, progress=False, auto_adjust=True)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+        df = yf.download(ticker, period=period, progress=False,
+                         auto_adjust=True, multi_level_index=False)
+        if "Close" not in df.columns:
+            # fallback for older yfinance with MultiIndex
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
         return df[["Close"]].dropna()
     except Exception:
         return pd.DataFrame()
@@ -160,14 +161,14 @@ def world_bank(code: str, country: str = "IN") -> pd.DataFrame:
         r = requests.get(url, timeout=15)
         raw = r.json()
         if len(raw) > 1 and raw[1]:
-            df = pd.DataFrame(raw[1])[["date", "value"]].dropna()
+            df = pd.DataFrame(raw[1])[["date","value"]].dropna()
             df["date"] = pd.to_numeric(df["date"])
             return df.sort_values("date").reset_index(drop=True)
-        return pd.DataFrame()
     except Exception:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
-# ─── Utility ─────────────────────────────────────────────────────────────────
+# ─── Utilities ───────────────────────────────────────────────────────────────
 def fmt_val(val, unit):
     if val is None:
         return "N/A"
@@ -187,15 +188,12 @@ def signal_badge(pct, inverse=False):
     return ("🟢 Bullish", "#238636") if eff > 0 else ("🔴 Bearish", "#da3633")
 
 def cell_color(val):
-    if "Bullish" in str(val):
+    s = str(val)
+    if "Bullish" in s or s == "Direct":
         return "background-color:#1a3a2e;color:#3fb950"
-    if "Bearish" in str(val):
+    if "Bearish" in s or s == "Inverse":
         return "background-color:#3a1a1a;color:#f85149"
-    if val == "Direct":
-        return "background-color:#1a3a2e;color:#3fb950"
-    if val == "Inverse":
-        return "background-color:#3a1a1a;color:#f85149"
-    if val == "Strong":
+    if s == "Strong":
         return "color:#e6edf3;font-weight:bold"
     return "background-color:#161b22;color:#8b949e"
 
@@ -212,17 +210,17 @@ def dual_axis_chart(t1, t2, l1, l2, period, color2):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#161b22", plot_bgcolor="#0d1117",
-        height=390, margin=dict(l=0, r=0, t=35, b=0),
-        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center", bgcolor="rgba(0,0,0,0)"),
-        font=dict(color="#8b949e", size=12),
-        xaxis=dict(gridcolor="#21262d", showgrid=True),
+        height=390, margin=dict(l=0,r=0,t=35,b=0),
+        legend=dict(orientation="h",y=1.08,x=0.5,xanchor="center",bgcolor="rgba(0,0,0,0)"),
+        font=dict(color="#8b949e",size=12),
+        xaxis=dict(gridcolor="#21262d"),
         yaxis=dict(title=l1, gridcolor="#21262d"),
         yaxis2=dict(title=l2, gridcolor="#21262d"),
     )
     m1 = d1["Close"].resample("ME").last()
     m2 = d2["Close"].resample("ME").last()
     combined = pd.concat([m1, m2], axis=1).dropna()
-    corr = float(combined.corr().iloc[0, 1]) if len(combined) > 5 else None
+    corr = float(combined.corr().iloc[0,1]) if len(combined) > 5 else None
     return fig, corr
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -231,11 +229,14 @@ def dual_axis_chart(t1, t2, l1, l2, period, color2):
 with st.sidebar:
     st.markdown("## 🇮🇳 India Macro Dashboard")
     st.caption(f"🕐 {datetime.now().strftime('%d %b %Y  %I:%M %p IST')}")
-    st.caption("⏱ Auto-refreshes every 5 minutes")
+    if AUTOREFRESH_OK:
+        st.caption("⏱ Auto-refreshes every 5 minutes")
+    else:
+        if st.button("🔄 Refresh Now"):
+            st.cache_data.clear()
+            st.rerun()
     st.divider()
-
-    chart_period = st.selectbox("📅 Chart Lookback Period",
-                                ["6mo","1y","2y","5y","max"], index=2)
+    chart_period = st.selectbox("📅 Chart Period", ["6mo","1y","2y","5y","max"], index=2)
     st.divider()
     show_sectors = st.toggle("🏭 NSE Sector Heatmap", value=True)
     show_charts  = st.toggle("📈 Correlation Charts",  value=True)
@@ -244,16 +245,13 @@ with st.sidebar:
     st.divider()
     st.markdown("""
 **📡 Data Sources**
-- Yahoo Finance (`yfinance`)
+- Yahoo Finance (yfinance)
 - World Bank Open API
-- Auto-refresh: every 5 min
 
-**🔑 Legend**
-| Color | Meaning |
-|-------|---------|
-| 🟢 | Bullish for Nifty |
-| 🔴 | Bearish for Nifty |
-| ⚪ | Neutral / No data |
+**🔑 Signal Legend**
+- 🟢 Bullish for Nifty
+- 🔴 Bearish for Nifty
+- ⚪ Neutral / No data
 """)
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -274,26 +272,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  SECTION 1 ─ MARKET PULSE
+#  SECTION 1 — MARKET PULSE
 # ═════════════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-hdr">📊 Section 1 — Market Pulse (Live)</div>',
             unsafe_allow_html=True)
 
 t_items = list(MARKET_TICKERS.items())
-cols1 = st.columns(5)
-cols2 = st.columns(5)
-for i, (name, (tick, unit, inv)) in enumerate(t_items):
-    price, prev = get_price(tick)
-    pct = pct_chg(price, prev)
-    badge, _ = signal_badge(pct, inv)
-    icon = badge[:2]
-    delta = f"{pct:+.2f}%" if pct is not None else "N/A"
-    target_col = cols1[i % 5] if i < 5 else cols2[i % 5]
-    with target_col:
-        st.metric(label=f"{icon} {name}", value=fmt_val(price, unit), delta=delta)
+for row_start in [0, 5]:
+    row_cols = st.columns(5)
+    for i, (name, (tick, unit, inv)) in enumerate(t_items[row_start:row_start+5]):
+        price, prev = get_price(tick)
+        pct  = pct_chg(price, prev)
+        badge, _ = signal_badge(pct, inv)
+        with row_cols[i]:
+            st.metric(
+                label=f"{badge[:2]} {name}",
+                value=fmt_val(price, unit),
+                delta=f"{pct:+.2f}%" if pct is not None else "N/A"
+            )
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  SECTION 2 ─ MACRO SIGNAL SCORECARD
+#  SECTION 2 — MACRO SIGNAL SCORECARD
 # ═════════════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-hdr">🎯 Section 2 — Daily Macro Signal Scorecard</div>',
             unsafe_allow_html=True)
@@ -301,7 +300,7 @@ st.markdown('<div class="section-hdr">🎯 Section 2 — Daily Macro Signal Scor
 rows = []
 for name, (tick, unit, inv) in MARKET_TICKERS.items():
     price, prev = get_price(tick)
-    pct = pct_chg(price, prev)
+    pct   = pct_chg(price, prev)
     badge, _ = signal_badge(pct, inv)
     rows.append({
         "Indicator":      name,
@@ -312,16 +311,16 @@ for name, (tick, unit, inv) in MARKET_TICKERS.items():
     })
 
 df_score = pd.DataFrame(rows)
-styled_score = (
+st.dataframe(
     df_score.style
-    .applymap(cell_color, subset=["Market Signal", "Market Relation"])
-    .set_properties(**{"background-color": "#161b22", "color": "#e6edf3",
-                       "border": "1px solid #30363d"})
+    .applymap(cell_color, subset=["Market Signal","Market Relation"])
+    .set_properties(**{"background-color":"#161b22","color":"#e6edf3",
+                       "border":"1px solid #30363d"}),
+    use_container_width=True, hide_index=True
 )
-st.dataframe(styled_score, use_container_width=True, hide_index=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  SECTION 3 ─ NSE SECTOR HEATMAP
+#  SECTION 3 — NSE SECTOR HEATMAP
 # ═════════════════════════════════════════════════════════════════════════════
 if show_sectors:
     st.markdown('<div class="section-hdr">🏭 Section 3 — NSE Sector Heatmap (Live)</div>',
@@ -331,17 +330,16 @@ if show_sectors:
     for i, (sname, stick) in enumerate(sec_items):
         sp, sprev = get_price(stick)
         spct = pct_chg(sp, sprev)
-        sbadge, _ = signal_badge(spct, inverse=False)
-        icon = sbadge[:2]
+        sbadge, _ = signal_badge(spct, False)
         with s_cols[i % 4]:
             st.metric(
-                label=f"{icon} {sname}",
+                label=f"{sbadge[:2]} {sname}",
                 value=fmt_val(sp, ""),
                 delta=f"{spct:+.2f}%" if spct else "N/A"
             )
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  SECTION 4 ─ HISTORICAL CORRELATION CHARTS
+#  SECTION 4 — CORRELATION CHARTS
 # ═════════════════════════════════════════════════════════════════════════════
 if show_charts:
     st.markdown('<div class="section-hdr">📈 Section 4 — Historical Correlation Charts</div>',
@@ -357,18 +355,19 @@ if show_charts:
                     observed = ("Inverse" if corr < -0.1 else
                                 ("Direct" if corr > 0.1 else "No clear relation"))
                     match = ("✅ Matches expectation"
-                             if (expected == "Inverse" and corr < -0.1) or
-                                (expected == "Direct"  and corr > 0.1)
-                             else "⚠️ Diverging — context needed")
-                    c1, c2, c3 = st.columns(3)
+                             if (expected=="Inverse" and corr < -0.1) or
+                                (expected=="Direct"  and corr > 0.1)
+                             else "⚠️ Diverging — check context")
+                    c1,c2,c3 = st.columns(3)
                     c1.metric("Pearson Correlation (r)", f"{corr:.3f}")
-                    c2.metric("Observed Relationship", f"{'📉' if observed=='Inverse' else '📈'} {observed}")
+                    c2.metric("Observed Relationship",
+                              f"{'📉' if observed=='Inverse' else '📈'} {observed}")
                     c3.metric("Expected vs Actual", match)
             else:
-                st.warning(f"⚠️ Could not load chart data for {tab_name}.")
+                st.warning(f"⚠️ Could not load data for {tab_name}")
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  SECTION 5 ─ WORLD BANK MACRO DATA
+#  SECTION 5 — WORLD BANK DATA
 # ═════════════════════════════════════════════════════════════════════════════
 if show_wb:
     st.markdown('<div class="section-hdr">🌍 Section 5 — World Bank Macro Indicators (India, Annual)</div>',
@@ -377,37 +376,37 @@ if show_wb:
     for label, (code, relation) in WB_INDICATORS.items():
         df_wb = world_bank(code)
         if not df_wb.empty and len(df_wb) >= 2:
-            latest  = df_wb.iloc[-1]
-            prev_r  = df_wb.iloc[-2]
-            chg     = latest["value"] - prev_r["value"]
-            bull    = (chg > 0 and relation == "Direct") or (chg < 0 and relation == "Inverse")
-            signal  = "🟢 Bullish" if bull else "🔴 Bearish"
+            latest = df_wb.iloc[-1]
+            prev_r = df_wb.iloc[-2]
+            chg    = latest["value"] - prev_r["value"]
+            bull   = (chg > 0 and relation=="Direct") or (chg < 0 and relation=="Inverse")
+            sig    = "🟢 Bullish" if bull else "🔴 Bearish"
+            wb_rows.append({
+                "Indicator":       label,
+                "Latest Value":    f"{latest['value']:.2f}%",
+                "Year":            int(latest["date"]),
+                "YoY Change":      f"{chg:+.2f}%",
+                "Market Relation": relation,
+                "Market Signal":   sig,
+            })
         else:
-            latest  = type("obj", (object,), {"value": None, "date": "-"})()
-            chg     = None
-            signal  = "⚪ Loading…"
-        wb_rows.append({
-            "Indicator":      label,
-            "Latest Value":   f"{latest.value:.2f}%" if latest.value else "Fetching…",
-            "Year":           int(latest.date) if str(latest.date).isdigit() else "-",
-            "YoY Change":     f"{chg:+.2f}%" if chg is not None else "-",
-            "Market Relation":relation,
-            "Market Signal":  signal,
-        })
+            wb_rows.append({
+                "Indicator": label, "Latest Value": "Loading…",
+                "Year": "-", "YoY Change": "-",
+                "Market Relation": relation, "Market Signal": "⚪ N/A",
+            })
 
-    df_wb_disp = pd.DataFrame(wb_rows)
     st.dataframe(
-        df_wb_disp.style
+        pd.DataFrame(wb_rows).style
         .applymap(cell_color, subset=["Market Signal","Market Relation"])
         .set_properties(**{"background-color":"#161b22","color":"#e6edf3",
                            "border":"1px solid #30363d"}),
         use_container_width=True, hide_index=True
     )
 
-    # ── GDP 30-year bar chart ──────────────────────────────────────────────
     df_gdp = world_bank("NY.GDP.MKTP.KD.ZG")
     if not df_gdp.empty:
-        st.markdown("###### 🇮🇳 India GDP Growth Rate — 30-Year Trend")
+        st.markdown("###### 🇮🇳 India GDP Growth — 30-Year Trend")
         fig_gdp = go.Figure(go.Bar(
             x=df_gdp["date"], y=df_gdp["value"],
             marker_color=["#238636" if v >= 0 else "#da3633" for v in df_gdp["value"]],
@@ -415,9 +414,8 @@ if show_wb:
             textposition="outside",
         ))
         fig_gdp.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="#161b22", plot_bgcolor="#0d1117",
-            height=320, margin=dict(l=0,r=0,t=30,b=0),
+            template="plotly_dark", paper_bgcolor="#161b22", plot_bgcolor="#0d1117",
+            height=300, margin=dict(l=0,r=0,t=20,b=0),
             yaxis_title="GDP Growth (%)",
             font=dict(color="#8b949e"),
             xaxis=dict(gridcolor="#21262d"),
@@ -426,10 +424,10 @@ if show_wb:
         st.plotly_chart(fig_gdp, use_container_width=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  SECTION 6 ─ COMPLETE MACRO REFERENCE TABLE
+#  SECTION 6 — REFERENCE TABLE
 # ═════════════════════════════════════════════════════════════════════════════
 if show_ref:
-    st.markdown('<div class="section-hdr">📋 Section 6 — Complete 24-Indicator Macro Reference</div>',
+    st.markdown('<div class="section-hdr">📋 Section 6 — Complete 24-Indicator Reference</div>',
                 unsafe_allow_html=True)
     df_ref = pd.DataFrame(ALL_MACRO,
                           columns=["Macro Indicator","Relation","Strength","Rationale"])
@@ -448,12 +446,10 @@ st.divider()
 st.markdown(f"""
 <div style="background:#161b22;border-radius:10px;padding:16px;border:1px solid #30363d;">
   <p style="color:#8b949e;font-size:12px;margin:0;line-height:1.8;">
-    <b style="color:#e6edf3;">📡 Data:</b> Yahoo Finance (yfinance) &nbsp;|&nbsp;
-    World Bank Open API &nbsp;|&nbsp; All free, no API keys required<br>
-    <b style="color:#e6edf3;">⏱ Market data</b> refreshes every 5 min &nbsp;|&nbsp;
-    <b style="color:#e6edf3;">World Bank data</b> refreshes daily<br>
-    <b style="color:#e6edf3;">⚡ Last refreshed:</b>
-    {datetime.now().strftime("%d %b %Y, %I:%M:%S %p IST")}
+    <b style="color:#e6edf3;">📡 Data:</b> Yahoo Finance (yfinance) &nbsp;|&nbsp; World Bank Open API &nbsp;|&nbsp; No API keys required<br>
+    <b style="color:#e6edf3;">⏱ Market data:</b> refreshes every 5 min &nbsp;|&nbsp;
+    <b style="color:#e6edf3;">World Bank data:</b> refreshes daily<br>
+    <b style="color:#e6edf3;">⚡ Last refreshed:</b> {datetime.now().strftime("%d %b %Y, %I:%M:%S %p IST")}
   </p>
 </div>
 """, unsafe_allow_html=True)
